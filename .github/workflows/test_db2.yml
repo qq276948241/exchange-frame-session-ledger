@@ -1,0 +1,58 @@
+# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
+# For more information see: https://help.github.com/actions/language-and-framework-guides/using-python-with-github-actions
+
+name: Python package
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13', '3.14']
+
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Start db2 container
+      run: |
+        docker run -itd --name db2 --privileged=true -p 50000:50000 -e LICENSE=accept -e DB2INST1_PASSWORD=password -e DBNAME=testdb --platform=linux/amd64 icr.io/db2_community/db2
+
+    - name: Wait database create
+      timeout-minutes: 12
+      run: |
+        OK=0
+        for t in {0..140}; do
+          if python3 -c "import sys; sys.path.insert(0, '.'); import drda; c = drda.connect(host='localhost', database='testdb', user='db2inst1', password='password', port=50000); c.close()" 2>/dev/null; then
+            OK=$((OK+1))
+            if [ $OK -ge 3 ]; then
+              exit 0
+            fi
+          else
+            OK=0
+          fi
+          sleep 5
+        done
+        exit 1
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Test
+      run: |
+        python test_db2.py
+
+    - name: Test (asyncio)
+      run: |
+        python test_async_db2.py
+
+    - name: Test (exceptions)
+      run: |
+        python test_exceptions.py
